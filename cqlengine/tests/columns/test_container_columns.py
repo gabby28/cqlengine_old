@@ -115,7 +115,7 @@ class TestSetColumn(BaseCassEngTestCase):
         assert len(statements) == 1
 
         assert ctx.values()[0].value == {1, 2, 3, 4}
-        assert statements[0] == '"TEST" = :{}'.format(ctx.keys()[0])
+        assert statements[0] == '"TEST" = {{}}'.format(ctx.keys()[0])
 
     def test_update_from_empty(self):
         """ Tests that updating an empty list creates a straight insert statement """
@@ -128,7 +128,7 @@ class TestSetColumn(BaseCassEngTestCase):
         assert len(statements) == 1
 
         assert ctx.values()[0].value == {1, 2, 3, 4}
-        assert statements[0] == '"TEST" = :{}'.format(ctx.keys()[0])
+        assert statements[0] == '"TEST" = {{}}'.format(ctx.keys()[0])
 
     def test_instantiation_with_column_class(self):
         """
@@ -144,8 +144,6 @@ class TestSetColumn(BaseCassEngTestCase):
         """
         column = columns.Set(columns.Text(min_length=100))
         assert isinstance(column.value_col, columns.Text)
-
-
 
     def test_to_python(self):
         """ Tests that to_python of value column is called """
@@ -245,7 +243,7 @@ class TestListColumn(BaseCassEngTestCase):
         assert len(statements) == 1
 
         assert ctx.values()[0].value == [1, 2, 3]
-        assert statements[0] == '"TEST" = :{}'.format(ctx.keys()[0])
+        assert statements[0] == '"TEST" = {}'.format(ctx.keys()[0])
 
     def test_update_from_empty(self):
         """ Tests that updating an empty list creates a straight insert statement """
@@ -258,7 +256,7 @@ class TestListColumn(BaseCassEngTestCase):
         assert len(statements) == 1
 
         assert ctx.values()[0].value == [1, 2, 3]
-        assert statements[0] == '"TEST" = :{}'.format(ctx.keys()[0])
+        assert statements[0] == '"TEST" = {}'.format(ctx.keys()[0])
 
     def test_instantiation_with_column_class(self):
         """

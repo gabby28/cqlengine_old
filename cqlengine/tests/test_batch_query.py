@@ -1,6 +1,3 @@
-from unittest import skip
-from uuid import uuid4
-import random
 from cqlengine import Model, columns
 from cqlengine.management import delete_table, create_table
 from cqlengine.query import BatchQuery
@@ -34,7 +31,7 @@ class BatchQueryTests(BaseCassEngTestCase):
     def test_insert_success_case(self):
 
         b = BatchQuery()
-        inst = TestMultiKeyModel.batch(b).create(partition=self.pkey, cluster=2, count=3, text='4')
+        TestMultiKeyModel.batch(b).create(partition=self.pkey, cluster=2, count=3, text='4')
 
         with self.assertRaises(TestMultiKeyModel.DoesNotExist):
             TestMultiKeyModel.get(partition=self.pkey, cluster=2)

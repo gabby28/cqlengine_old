@@ -9,7 +9,7 @@ class QueryValue(object):
     be passed into .filter() keyword args
     """
 
-    _cql_string = ':{}'
+    _cql_string = '%({})s'
 
     def __init__(self, value, identifier=None):
         self.value = value
@@ -67,7 +67,7 @@ class MaxTimeUUID(BaseQueryFunction):
     http://cassandra.apache.org/doc/cql3/CQL.html#timeuuidFun
     """
 
-    _cql_string = 'MaxTimeUUID(:{})'
+    _cql_string = 'MaxTimeUUID(%({})s)'
 
     def __init__(self, value):
         """

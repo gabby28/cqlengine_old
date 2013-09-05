@@ -28,7 +28,7 @@ def create_keyspace(name, strategy_class='SimpleStrategy', replication_factor=3,
     :param **replication_values: 1.2 only, additional values to ad to the replication data map
     """
     with connection_manager() as con:
-        _, keyspaces = con.execute("""SELECT keyspace_name FROM system.schema_keyspaces""", {})
+        keyspaces = con.execute("""SELECT keyspace_name FROM system.schema_keyspaces""", {})
         if name not in [r[0] for r in keyspaces]:
             #try the 1.2 method
             replication_map = {
@@ -74,10 +74,10 @@ def sync_table(model, create_missing_keyspace=True):
 
     with connection_manager() as con:
         tables = con.execute(
-            "SELECT columnfamily_name from system.schema_columnfamilies WHERE keyspace_name = :ks_name",
+            "SELECT columnfamily_name from system.schema_columnfamilies WHERE keyspace_name = %(ks_name)s",
             {'ks_name': ks_name}
         )
-    tables = [x[0] for x in tables.results]
+    tables = [x.columnfamily_name for x in tables]
 
     #check for an existing column family
     if raw_cf_name not in tables:
@@ -108,12 +108,12 @@ def sync_table(model, create_missing_keyspace=True):
 
     #get existing index names, skip ones that already exist
     with connection_manager() as con:
-        _, idx_names = con.execute(
-            "SELECT index_name from system.\"IndexInfo\" WHERE table_name=:table_name",
+        idx_names = con.execute(
+            "SELECT index_name from system.\"IndexInfo\" WHERE table_name=%(table_name)s",
             {'table_name': raw_cf_name}
         )
 
-    idx_names = [i[0] for i in idx_names]
+    idx_names = [i.index_name for i in idx_names]
     idx_names = filter(None, idx_names)
 
     indexes = [c for n,c in model._columns.items() if c.index]
@@ -221,12 +221,12 @@ def get_fields(model):
 
     with connection_manager() as con:
         query = "SELECT column_name, validator FROM system.schema_columns \
-                 WHERE keyspace_name = :ks_name AND columnfamily_name = :col_family"
+                 WHERE keyspace_name = %(ks_name)s AND columnfamily_name = %(col_family)s"
 
         logger.debug("get_fields %s %s", ks_name, col_family)
 
-        tmp = con.execute(query, {'ks_name':ks_name, 'col_family':col_family})
-    return [Field(x[0], x[1]) for x in tmp.results]
+        results = con.execute(query, {'ks_name':ks_name, 'col_family':col_family})
+    return [Field(x.column_name, x.validator) for x in results]
     # convert to Field named tuples
 
 
@@ -275,8 +275,8 @@ def drop_table(model):
     # don't try to delete non existant tables
     ks_name = model._get_keyspace()
     with connection_manager() as con:
-        _, tables = con.execute(
-            "SELECT columnfamily_name from system.schema_columnfamilies WHERE keyspace_name = :ks_name",
+        tables = con.execute(
+            "SELECT columnfamily_name from system.schema_columnfamilies WHERE keyspace_name = %(ks_name)s",
             {'ks_name': ks_name}
         )
     raw_cf_name = model.column_family_name(include_keyspace=False)

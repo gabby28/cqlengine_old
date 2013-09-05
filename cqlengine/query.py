@@ -1,13 +1,9 @@
 import copy
 from datetime import datetime
 from uuid import uuid4
-from hashlib import md5
-from time import time
-from uuid import uuid1
-from cqlengine import BaseContainerColumn, BaseValueManager, Map, columns
+from cqlengine import BaseContainerColumn, Map, columns
 from cqlengine.columns import Counter
-
-from cqlengine.connection import connection_manager, execute, RowResult
+from cqlengine.connection import execute
 
 from cqlengine.exceptions import CQLEngineException
 from cqlengine.functions import QueryValue, Token
@@ -131,7 +127,7 @@ class IterableQueryValue(QueryValue):
         return dict((i, column.to_database(v)) for (i, v) in zip(self.identifier, self.value))
 
     def get_cql(self):
-        return '({})'.format(', '.join(':{}'.format(i) for i in self.identifier))
+        return '({})'.format(', '.join('%({})s'.format(i) for i in self.identifier))
 
 class InOperator(EqualsOperator):
     symbol = 'IN'
@@ -351,8 +347,9 @@ class AbstractQuerySet(object):
         if self._batch:
             raise CQLEngineException("Only inserts, updates, and deletes are available in batch mode")
         if self._result_cache is None:
-            columns, self._result_cache = execute(self._select_query(), self._where_values())
-            self._construct_result = self._get_result_constructor(columns)
+            self._result_cache = execute(self._select_query(), self._where_values())
+            field_names = set(sum([res._fields for res in self._result_cache], tuple()))
+            self._construct_result = self._get_result_constructor(field_names)
 
     def _fill_result_cache_to_idx(self, idx):
         self._execute_query()
@@ -374,10 +371,10 @@ class AbstractQuerySet(object):
 
     def __iter__(self):
         self._execute_query()
-
         for idx in range(len(self._result_cache)):
             instance = self._result_cache[idx]
-            if isinstance(instance, RowResult):
+            # TODO: find a better way to check for this (cassandra.decoder.Row is factorized :/)
+            if instance.__class__.__name__ == 'Row':
                 self._fill_result_cache_to_idx(idx)
             yield self._result_cache[idx]
 
@@ -543,7 +540,7 @@ class AbstractQuerySet(object):
 
             qs = ' '.join(qs)
 
-            _, result = execute(qs, self._where_values())
+            result = execute(qs, self._where_values())
             return result[0][0]
         else:
             return len(self._result_cache)
@@ -655,7 +652,7 @@ class SimpleQuerySet(AbstractQuerySet):
         Returns a function that will be used to instantiate query results
         """
         def _construct_instance(values):
-            return ResultObject(zip(names, values))
+            return ResultObject([(name, getattr(values, name)) for name in names])
         return _construct_instance
 
 class ModelQuerySet(AbstractQuerySet):
@@ -702,7 +699,7 @@ class ModelQuerySet(AbstractQuerySet):
         model = self.model
         db_map = model._db_map
         def _construct_instance(values):
-            field_dict = dict((db_map.get(k, k), v) for k, v in zip(names, values))
+            field_dict = dict((db_map.get(field, field), getattr(values, field)) for field in names)
             instance = model(**field_dict)
             instance._is_persisted = True
             return instance
@@ -821,14 +818,14 @@ class DMLQuery(object):
                         set_statements += col.get_update_statement(val, val_mgr.previous_value, query_values)
 
                     else:
-                        set_statements += ['"{}" = :{}'.format(col.db_field_name, field_ids[col.db_field_name])]
+                        set_statements += ['"{}" = %({})s'.format(col.db_field_name, field_ids[col.db_field_name])]
             qs += [', '.join(set_statements)]
 
             qs += ['WHERE']
 
             where_statements = []
             for name, col in self.model._primary_keys.items():
-                where_statements += ['"{}" = :{}'.format(col.db_field_name, field_ids[col.db_field_name])]
+                where_statements += ['"{}" = %({})s'.format(col.db_field_name, field_ids[col.db_field_name])]
 
             qs += [' AND '.join(where_statements)]
 
@@ -840,7 +837,7 @@ class DMLQuery(object):
             qs += ["INSERT INTO {}".format(self.column_family_name)]
             qs += ["({})".format(', '.join(['"{}"'.format(f) for f in field_names]))]
             qs += ['VALUES']
-            qs += ["({})".format(', '.join([':'+field_ids[f] for f in field_names]))]
+            qs += ["({})".format(', '.join(['%('+field_ids[f]+')s' for f in field_names]))]
 
         qs = ' '.join(qs)
 
@@ -875,7 +872,7 @@ class DMLQuery(object):
             for name, col in self.model._primary_keys.items():
                 field_id = uuid4().hex
                 query_values[field_id] = field_values[name]
-                where_statements += ['"{}" = :{}'.format(col.db_field_name, field_id)]
+                where_statements += ['"{}" = %({})s'.format(col.db_field_name, field_id)]
             qs += [' AND '.join(where_statements)]
 
             qs = ' '.join(qs)
@@ -896,7 +893,7 @@ class DMLQuery(object):
         for name, col in self.model._primary_keys.items():
             field_id = uuid4().hex
             field_values[field_id] = col.to_database(getattr(self.instance, name))
-            where_statements += ['"{}" = :{}'.format(col.db_field_name, field_id)]
+            where_statements += ['"{}" = %({})s'.format(col.db_field_name, field_id)]
 
         qs += [' AND '.join(where_statements)]
         qs = ' '.join(qs)
