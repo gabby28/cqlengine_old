@@ -262,7 +262,8 @@ class BaseModel(object):
         """ Returns a map of column names to cleaned values """
         values = self._dynamic_columns or {}
         for name, col in self._columns.items():
-            values[name] = col.to_database(getattr(self, name, None))
+            values[name] = getattr(self, name, None)
+        print values
         return values
 
     @classmethod

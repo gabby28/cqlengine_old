@@ -1,4 +1,4 @@
-#column field types
+from cassandra import cqltypes
 from copy import copy
 from datetime import datetime
 from datetime import date
@@ -89,6 +89,9 @@ class Column(object):
 
     #the cassandra type this column maps to
     db_type = None
+    #the cassandra-driver cql type (see cassandra.cqltypes)
+    ctype = None
+
     value_manager = BaseValueManager
 
     instance_counter = 0
@@ -131,30 +134,26 @@ class Column(object):
         Column.instance_counter += 1
 
     def validate(self, value):
-        """
-        Returns a cleaned and validated value. Raises a ValidationError
-        if there's a problem
-        """
+        '''
+        add extra validation (before cassandra-driver)
+        '''
         if value is None:
             if self.has_default:
-                return self.get_default()
+                value = self.get_default()
             elif self.required:
-                raise ValidationError('{} - None values are not allowed'.format(self.column_name or self.db_field))
+                value = self.ctype.validate(value)
         return value
 
     def to_python(self, value):
-        """
-        Converts data from the database into python values
-        raises a ValidationError if the value can't be converted
-        """
+        '''
+        cassandra storage -> cassandra-driver python mapping -> to_python
+
+        '''
         return value
 
     def to_database(self, value):
-        """
-        Converts python value into database value
-        """
         if value is None and self.has_default:
-            return self.get_default()
+            value = self.get_default()
         return value
 
     @property
@@ -209,19 +208,17 @@ class Column(object):
 
 class Bytes(Column):
     db_type = 'blob'
-
-    def to_database(self, value):
-        val = super(Bytes, self).to_database(value)
-        if val is None: return
-        return val.encode('hex')
+    ctype = cqltypes.BytesType
 
 
 class Ascii(Column):
     db_type = 'ascii'
+    ctype = cqltypes.AsciiType
 
 
 class Text(Column):
     db_type = 'text'
+    ctype = cqltypes.UTF8Type
 
     def __init__(self, *args, **kwargs):
         self.min_length = kwargs.pop('min_length', 1 if kwargs.get('required', False) else None)
@@ -244,40 +241,12 @@ class Text(Column):
 
 class Integer(Column):
     db_type = 'int'
-
-    def validate(self, value):
-        val = super(Integer, self).validate(value)
-        if val is None: return
-        try:
-            return long(val)
-        except (TypeError, ValueError):
-            raise ValidationError("{} can't be converted to integral value".format(value))
-
-    def to_python(self, value):
-        return self.validate(value)
-
-    def to_database(self, value):
-        return self.validate(value)
+    ctype = cqltypes.Int32Type
 
 
 class VarInt(Column):
     db_type = 'varint'
-
-    def validate(self, value):
-        val = super(VarInt, self).validate(value)
-        if val is None:
-            return
-        try:
-            return long(val)
-        except (TypeError, ValueError):
-            raise ValidationError(
-                "{} can't be converted to integral value".format(value))
-
-    def to_python(self, value):
-        return self.validate(value)
-
-    def to_database(self, value):
-        return self.validate(value)
+    ctype = cqltypes.IntegerType
 
 
 class CounterValueManager(BaseValueManager):
@@ -316,60 +285,27 @@ class Counter(Integer):
         ctx[field_id] = delta
         return ['"{0}" = "{0}" {1} {2}'.format(self.db_field_name, sign, delta)]
 
-
 class DateTime(Column):
     db_type = 'timestamp'
-
-    def to_python(self, value):
-        if isinstance(value, datetime):
-            return value
-        elif isinstance(value, date):
-            return datetime(*(value.timetuple()[:6]))
-        return datetime.utcfromtimestamp(value)
-
-    def to_database(self, value):
-        value = super(DateTime, self).to_database(value)
-        if value is None: return
-        if not isinstance(value, datetime):
-            if isinstance(value, date):
-                value = datetime(value.year, value.month, value.day)
-            else:
-                raise ValidationError("'{}' is not a datetime object".format(value))
-        epoch = datetime(1970, 1, 1, tzinfo=value.tzinfo)
-        offset = 0
-        if epoch.tzinfo:
-            offset_delta = epoch.tzinfo.utcoffset(epoch)
-            offset = offset_delta.days*24*3600 + offset_delta.seconds
-        return long(((value  - epoch).total_seconds() - offset) * 1000)
+    ctype = cqltypes.DateType
 
 
 class Date(Column):
     db_type = 'timestamp'
-
+    ctype = cqltypes.DateType
 
     def to_python(self, value):
+        value = super(Date, self).to_python(value)
         if isinstance(value, datetime):
             return value.date()
-        elif isinstance(value, date):
-            return value
-
-        return datetime.utcfromtimestamp(value).date()
-
-    def to_database(self, value):
-        value = super(Date, self).to_database(value)
-        if isinstance(value, datetime):
-            value = value.date()
-        if not isinstance(value, date):
-            raise ValidationError("'{}' is not a date object".format(repr(value)))
-
-        return long((value - date(1970, 1, 1)).total_seconds() * 1000)
-
+        return value
 
 class UUID(Column):
     """
     Type 1 or 4 UUID
     """
     db_type = 'uuid'
+    ctype = cqltypes.UUIDType
 
     re_uuid = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 
@@ -382,11 +318,6 @@ class UUID(Column):
                 return _UUID(val)
         raise ValidationError("{} is not a valid uuid".format(value))
 
-    def to_python(self, value):
-        return self.validate(value)
-
-    def to_database(self, value):
-        return self.validate(value)
 
 from uuid import UUID as pyUUID, getnode
 
@@ -397,6 +328,7 @@ class TimeUUID(UUID):
     """
 
     db_type = 'timeuuid'
+    ctype = cqltypes.TimeUUIDType
 
     @classmethod
     def from_datetime(self, dt):
@@ -440,25 +372,12 @@ class TimeUUID(UUID):
 
 class Boolean(Column):
     db_type = 'boolean'
-
-    class Quoter(ValueQuoter):
-        """ Cassandra 1.2.5 is stricter about boolean values """
-        def __str__(self):
-            return 'true' if self.value else 'false'
-
-    def to_python(self, value):
-        return bool(value)
-
-    def to_database(self, value):
-        return self.Quoter(bool(value))
+    ctype = cqltypes.BooleanType
 
 
 class Float(Column):
     db_type = 'double'
-
-    def __init__(self, double_precision=True, **kwargs):
-        self.db_type = 'double' if double_precision else 'float'
-        super(Float, self).__init__(**kwargs)
+    ctype = cqltypes.DoubleType
 
     def validate(self, value):
         value = super(Float, self).validate(value)
@@ -468,31 +387,10 @@ class Float(Column):
         except (TypeError, ValueError):
             raise ValidationError("{} is not a valid float".format(value))
 
-    def to_python(self, value):
-        return self.validate(value)
-
-    def to_database(self, value):
-        return self.validate(value)
-
 
 class Decimal(Column):
     db_type = 'decimal'
-
-    def validate(self, value):
-        from decimal import Decimal as _Decimal
-        from decimal import InvalidOperation
-        val = super(Decimal, self).validate(value)
-        if val is None: return
-        try:
-            return _Decimal(val)
-        except InvalidOperation:
-            raise ValidationError("'{}' can't be coerced to decimal".format(val))
-
-    def to_python(self, value):
-        return self.validate(value)
-
-    def to_database(self, value):
-        return self.validate(value)
+    ctype = cqltypes.DecimalType
 
 
 class BaseContainerColumn(Column):

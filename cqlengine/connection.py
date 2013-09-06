@@ -1,6 +1,7 @@
 from cassandra.cluster import Cluster
 from contextlib import contextmanager
 from cqlengine.exceptions import CQLEngineException
+from cassandra.io.libevreactor import LibevConnection
 import logging
 
 
@@ -44,17 +45,22 @@ def setup(hosts, username=None, password=None, max_connections=10, default_keysp
     if not _hosts:
         raise CQLConnectionError("At least one host required")
 
+    # raise Exception(_hosts)
     cluster = Cluster(_hosts, port=port)
-    connection_pool = cluster.connect()
+    cluster.connection_class = LibevConnection
+    connection_pool = cluster
 
 def execute(query, params=None):
     params = params or {}
+    global connection_pool
+    if hasattr(connection_pool, 'connect'):
+        connection_pool = connection_pool.connect()
     return connection_pool.execute(query, params)
 
 @contextmanager
 def connection_manager():
     """ :rtype: ConnectionPool """
     global connection_pool
-    # tmp = connection_pool.get()
+    if hasattr(connection_pool, 'connect'):
+        connection_pool = connection_pool.connect()
     yield connection_pool
-    # connection_pool.put(tmp)
