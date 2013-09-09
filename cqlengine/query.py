@@ -3,10 +3,13 @@ from datetime import datetime
 from uuid import uuid4
 from cqlengine import BaseContainerColumn, Map, columns
 from cqlengine.columns import Counter
+from cqlengine.connection import get_connection_pool
 from cqlengine.connection import execute
 
 from cqlengine.exceptions import CQLEngineException
 from cqlengine.functions import QueryValue, Token
+from cqlengine.utils import chunks
+
 
 #CQL 3 reference:
 #http://www.datastax.com/docs/1.1/references/cql/index
@@ -747,6 +750,63 @@ class ModelQuerySet(AbstractQuerySet):
         clone._values_list = True
         clone._flat_values_list = flat
         return clone
+
+    def get_model_columns(self):
+        return self.model._columns
+
+    def get_parametrized_insert_cql_query(self):
+        column_names = [col.db_field_name for col in self.get_model_columns().values()]
+        query_def = dict(
+            column_family=self.model.column_family_name(),
+            column_def=', '.join(column_names),
+            param_def=', '.join('?' * len(column_names))
+        )
+        return "INSERT INTO %(column_family)s (%(column_def)s) VALUES (%(param_def)s)" % query_def
+
+    def get_insert_parameters(self, model_instance):
+        dbvalues = []
+        for name in self.get_model_columns().keys():
+            dbvalues.append(getattr(model_instance, name))
+        return dbvalues
+
+    def batch_insert(self, instances, batch_size):
+        if self._batch:
+            raise CQLEngineException('you cant mix BatchQuery and batch inserts together')
+
+        connection_pool = get_connection_pool()
+        insert_queries_count = len(instances)
+        query_per_batch = min(batch_size, insert_queries_count)
+
+        insert_query = self.get_parametrized_insert_cql_query()
+        batch_query = """
+            BEGIN BATCH
+            {}
+            APPLY BATCH;
+        """
+
+        prepared_query = connection_pool.prepare(
+            batch_query.format(insert_query * query_per_batch)
+        )
+
+        if query_per_batch % insert_queries_count:
+            cleanup_prepared_query = connection_pool.prepare(
+                batch_query.format(insert_query * (insert_queries_count % query_per_batch) )
+            )
+
+        results = []
+        insert_chunks = chunks(instances, query_per_batch)
+        for insert_chunk in insert_chunks:
+            params = []
+            for model_instance in insert_chunk:
+                params += self.get_insert_parameters(model_instance)
+            if len(insert_chunk) == query_per_batch:
+                results.append(connection_pool.execute_async(prepared_query.bind(params)))
+            else:
+                results.append(connection_pool.execute_async(cleanup_prepared_query.bind(params)))
+
+        # block until results are returned
+        for r in results:
+            r.result()
 
 
 class DMLQuery(object):

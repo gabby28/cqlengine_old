@@ -9,21 +9,18 @@ LOG = logging.getLogger('cqlengine.cql')
 
 class CQLConnectionError(CQLEngineException): pass
 
-_max_connections = 10
-
 # global connection pool
 connection_pool = None
 
 
-def setup(hosts, username=None, password=None, max_connections=10, default_keyspace=None, consistency='ONE'):
+def setup(hosts, username=None, password=None, default_keyspace=None, consistency='ONE'):
     """
     Records the hosts and connects to one of them
 
     :param hosts: list of hosts, strings in the <hostname>:<port>, or just <hostname>
     """
-    global _max_connections
+
     global connection_pool
-    _max_connections = max_connections
 
     if default_keyspace:
         from cqlengine import models
@@ -45,22 +42,21 @@ def setup(hosts, username=None, password=None, max_connections=10, default_keysp
     if not _hosts:
         raise CQLConnectionError("At least one host required")
 
-    # raise Exception(_hosts)
     cluster = Cluster(_hosts, port=port)
     cluster.connection_class = LibevConnection
     connection_pool = cluster
 
-def execute(query, params=None):
-    params = params or {}
+def get_connection_pool():
     global connection_pool
     if hasattr(connection_pool, 'connect'):
         connection_pool = connection_pool.connect()
-    return connection_pool.execute(query, params)
+    return connection_pool
+
+def execute(query, params=None):
+    params = params or {}
+    return get_connection_pool().execute(query, params)
 
 @contextmanager
 def connection_manager():
-    """ :rtype: ConnectionPool """
     global connection_pool
-    if hasattr(connection_pool, 'connect'):
-        connection_pool = connection_pool.connect()
-    yield connection_pool
+    yield get_connection_pool()
