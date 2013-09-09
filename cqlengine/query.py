@@ -769,7 +769,7 @@ class ModelQuerySet(AbstractQuerySet):
             dbvalues.append(getattr(model_instance, name))
         return dbvalues
 
-    def batch_insert(self, instances, batch_size):
+    def batch_insert(self, instances, batch_size, atomic=True):
         if self._batch:
             raise CQLEngineException('you cant mix BatchQuery and batch inserts together')
 
@@ -778,11 +778,19 @@ class ModelQuerySet(AbstractQuerySet):
         query_per_batch = min(batch_size, insert_queries_count)
 
         insert_query = self.get_parametrized_insert_cql_query()
-        batch_query = """
-            BEGIN BATCH
-            {}
-            APPLY BATCH;
-        """
+
+        if atomic:
+            batch_query = """
+                BEGIN BATCH
+                {}
+                APPLY BATCH;
+            """
+        else:
+            batch_query = """
+                BEGIN UNLOGGED BATCH
+                {}
+                APPLY BATCH;
+            """
 
         prepared_query = connection_pool.prepare(
             batch_query.format(insert_query * query_per_batch)
