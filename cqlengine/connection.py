@@ -58,5 +58,4 @@ def execute(query, params=None):
 
 @contextmanager
 def connection_manager():
-    global connection_pool
     yield get_connection_pool()
