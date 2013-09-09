@@ -124,7 +124,7 @@ class IterableQueryValue(QueryValue):
             raise QueryException("in operator arguments must be iterable, {} found".format(value))
 
     def get_dict(self, column):
-        return dict((i, column.to_database(v)) for (i, v) in zip(self.identifier, self.value))
+        return dict((i, v) for (i, v) in zip(self.identifier, self.value))
 
     def get_cql(self):
         return '({})'.format(', '.join('%({})s'.format(i) for i in self.identifier))
@@ -892,7 +892,7 @@ class DMLQuery(object):
         where_statements = []
         for name, col in self.model._primary_keys.items():
             field_id = uuid4().hex
-            field_values[field_id] = col.to_database(getattr(self.instance, name))
+            field_values[field_id] = getattr(self.instance, name)
             where_statements += ['"{}" = %({})s'.format(col.db_field_name, field_id)]
 
         qs += [' AND '.join(where_statements)]

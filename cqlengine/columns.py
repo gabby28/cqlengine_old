@@ -22,6 +22,23 @@ def cql_quote(term, cql_major_version=3):
     else:
         return str(term)
 
+
+internal_clq_type_mapping = {
+    'text': cqltypes.UTF8Type,
+    'blob': cqltypes.BytesType,
+    'ascii': cqltypes.AsciiType,
+    'text': cqltypes.UTF8Type,
+    'int': cqltypes.Int32Type,
+    'varint': cqltypes.IntegerType,
+    'timestamp': cqltypes.DateType,
+    'uuid': cqltypes.UUIDType,
+    'timeuuid': cqltypes.TimeUUIDType,
+    'boolean': cqltypes.BooleanType,
+    'double': cqltypes.DoubleType,
+}
+
+
+
 class BaseValueManager(object):
 
     def __init__(self, instance, column, value):
@@ -89,8 +106,6 @@ class Column(object):
 
     #the cassandra type this column maps to
     db_type = None
-    #the cassandra-driver cql type (see cassandra.cqltypes)
-    ctype = None
 
     value_manager = BaseValueManager
 
@@ -146,15 +161,13 @@ class Column(object):
 
     def to_python(self, value):
         '''
-        cassandra storage -> cassandra-driver python mapping -> to_python
-
+        add some more pythonization to the already pythonized 
         '''
         return value
 
-    def to_database(self, value):
-        if value is None and self.has_default:
-            value = self.get_default()
-        return value
+    @property
+    def ctype(self):
+        return internal_clq_type_mapping[self.db_type]
 
     @property
     def has_default(self):
@@ -208,17 +221,14 @@ class Column(object):
 
 class Bytes(Column):
     db_type = 'blob'
-    ctype = cqltypes.BytesType
 
 
 class Ascii(Column):
     db_type = 'ascii'
-    ctype = cqltypes.AsciiType
 
 
 class Text(Column):
     db_type = 'text'
-    ctype = cqltypes.UTF8Type
 
     def __init__(self, *args, **kwargs):
         self.min_length = kwargs.pop('min_length', 1 if kwargs.get('required', False) else None)
@@ -241,12 +251,10 @@ class Text(Column):
 
 class Integer(Column):
     db_type = 'int'
-    ctype = cqltypes.Int32Type
 
 
 class VarInt(Column):
     db_type = 'varint'
-    ctype = cqltypes.IntegerType
 
 
 class CounterValueManager(BaseValueManager):
@@ -275,8 +283,7 @@ class Counter(Integer):
         )
 
     def get_update_statement(self, val, prev, ctx):
-        val = self.to_database(val)
-        prev = self.to_database(prev or 0)
+        prev = prev or 0
         field_id = uuid4().hex
 
         delta = val - prev
@@ -287,12 +294,10 @@ class Counter(Integer):
 
 class DateTime(Column):
     db_type = 'timestamp'
-    ctype = cqltypes.DateType
 
 
 class Date(Column):
     db_type = 'timestamp'
-    ctype = cqltypes.DateType
 
     def to_python(self, value):
         value = super(Date, self).to_python(value)
@@ -300,12 +305,12 @@ class Date(Column):
             return value.date()
         return value
 
+
 class UUID(Column):
     """
     Type 1 or 4 UUID
     """
     db_type = 'uuid'
-    ctype = cqltypes.UUIDType
 
     re_uuid = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 
@@ -328,7 +333,6 @@ class TimeUUID(UUID):
     """
 
     db_type = 'timeuuid'
-    ctype = cqltypes.TimeUUIDType
 
     @classmethod
     def from_datetime(self, dt):
@@ -372,12 +376,10 @@ class TimeUUID(UUID):
 
 class Boolean(Column):
     db_type = 'boolean'
-    ctype = cqltypes.BooleanType
 
 
 class Float(Column):
     db_type = 'double'
-    ctype = cqltypes.DoubleType
 
     def validate(self, value):
         value = super(Float, self).validate(value)
@@ -390,7 +392,6 @@ class Float(Column):
 
 class Decimal(Column):
     db_type = 'decimal'
-    ctype = cqltypes.DecimalType
 
 
 class BaseContainerColumn(Column):
@@ -473,12 +474,6 @@ class Set(BaseContainerColumn):
         if value is None: return set()
         return {self.value_col.to_python(v) for v in value}
 
-    def to_database(self, value):
-        if value is None: return None
-
-        if isinstance(value, self.Quoter): return value
-        return self.Quoter({self.value_col.to_database(v) for v in value})
-
     def get_update_statement(self, val, prev, ctx):
         """
         Returns statements that will be added to an object's update statement
@@ -491,8 +486,6 @@ class Set(BaseContainerColumn):
         """
 
         # remove from Quoter containers, if applicable
-        val = self.to_database(val)
-        prev = self.to_database(prev)
         if isinstance(val, self.Quoter): val = val.value
         if isinstance(prev, self.Quoter): prev = prev.value
 
@@ -551,19 +544,12 @@ class List(BaseContainerColumn):
         if value is None: return []
         return [self.value_col.to_python(v) for v in value]
 
-    def to_database(self, value):
-        if value is None: return None
-        if isinstance(value, self.Quoter): return value
-        return self.Quoter([self.value_col.to_database(v) for v in value])
-
     def get_update_statement(self, val, prev, values):
         """
         Returns statements that will be added to an object's update statement
         also updates the query context
         """
         # remove from Quoter containers, if applicable
-        val = self.to_database(val)
-        prev = self.to_database(prev)
         if isinstance(val, self.Quoter): val = val.value
         if isinstance(prev, self.Quoter): prev = prev.value
 
@@ -692,18 +678,11 @@ class Map(BaseContainerColumn):
         if value is not None:
             return {self.key_col.to_python(k): self.value_col.to_python(v) for k,v in value.items()}
 
-    def to_database(self, value):
-        if value is None: return None
-        if isinstance(value, self.Quoter): return value
-        return self.Quoter({self.key_col.to_database(k):self.value_col.to_database(v) for k,v in value.items()})
-
     def get_update_statement(self, val, prev, ctx):
         """
         http://www.datastax.com/docs/1.2/cql_cli/using/collections_map#deletion
         """
         # remove from Quoter containers, if applicable
-        val = self.to_database(val)
-        prev = self.to_database(prev)
         if isinstance(val, self.Quoter): val = val.value
         if isinstance(prev, self.Quoter): prev = prev.value
         val = val or {}
@@ -729,9 +708,6 @@ class Map(BaseContainerColumn):
         """
         if val is prev is None:
             return []
-
-        val = self.to_database(val)
-        prev = self.to_database(prev)
         if isinstance(val, self.Quoter): val = val.value
         if isinstance(prev, self.Quoter): prev = prev.value
 
@@ -757,9 +733,6 @@ class _PartitionKeysToken(Column):
     def __init__(self, model):
         self.partition_columns = model._partition_keys.values()
         super(_PartitionKeysToken, self).__init__(partition_key=True)
-
-    def to_database(self, value):
-        raise NotImplementedError
 
     def get_cql(self):
         return "token({})".format(", ".join(c.cql for c in self.partition_columns))
