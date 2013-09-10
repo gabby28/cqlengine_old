@@ -796,7 +796,7 @@ class ModelQuerySet(AbstractQuerySet):
             batch_query.format(insert_query * query_per_batch)
         )
 
-        if query_per_batch % insert_queries_count:
+        if insert_queries_count % query_per_batch:
             cleanup_prepared_query = connection_pool.prepare(
                 batch_query.format(insert_query * (insert_queries_count % query_per_batch) )
             )
