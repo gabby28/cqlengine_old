@@ -796,20 +796,16 @@ class ModelQuerySet(AbstractQuerySet):
             batch_query.format(insert_query * query_per_batch)
         )
 
-        if insert_queries_count % query_per_batch:
-            cleanup_prepared_query = connection_pool.prepare(
-                batch_query.format(insert_query * (insert_queries_count % query_per_batch) )
-            )
-
         results = []
         insert_chunks = chunks(instances, query_per_batch)
         for insert_chunk in insert_chunks:
-            params = []
-            for model_instance in insert_chunk:
-                params += self.get_insert_parameters(model_instance)
+            params = sum(self.get_insert_parameters(m) for m in insert_chunk, [])
             if len(insert_chunk) == query_per_batch:
                 results.append(connection_pool.execute_async(prepared_query.bind(params)))
-            else:
+            elif len(insert_chunk) > 0:
+                cleanup_prepared_query = connection_pool.prepare(
+                    batch_query.format(insert_query * len(insert_chunk) )
+                )
                 results.append(connection_pool.execute_async(cleanup_prepared_query.bind(params)))
 
         # block until results are returned
