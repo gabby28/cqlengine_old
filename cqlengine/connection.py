@@ -1,7 +1,6 @@
 from cassandra.cluster import Cluster
 from contextlib import contextmanager
 from cqlengine.exceptions import CQLEngineException
-from cassandra.io.libevreactor import LibevConnection
 import logging
 
 
@@ -43,7 +42,11 @@ def setup(hosts, username=None, password=None, default_keyspace=None, consistenc
         raise CQLConnectionError("At least one host required")
 
     cluster = Cluster(_hosts, port=port)
-    cluster.connection_class = LibevConnection
+    try:
+        from cassandra.io.libevreactor import LibevConnection
+        cluster.connection_class = LibevConnection
+    except ImportError:
+        LOG.info('Could not import cassandra.io.libevreactor.LibevConnection as connection_class')
     connection_pool = cluster
 
 def get_connection_pool():
