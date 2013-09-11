@@ -799,7 +799,7 @@ class ModelQuerySet(AbstractQuerySet):
         results = []
         insert_chunks = chunks(instances, query_per_batch)
         for insert_chunk in insert_chunks:
-            params = sum(self.get_insert_parameters(m) for m in insert_chunk, [])
+            params = sum([self.get_insert_parameters(m) for m in insert_chunk], [])
             if len(insert_chunk) == query_per_batch:
                 results.append(connection_pool.execute_async(prepared_query.bind(params)))
             elif len(insert_chunk) > 0:
