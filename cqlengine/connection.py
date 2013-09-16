@@ -24,6 +24,9 @@ def setup(hosts, username=None, password=None, default_keyspace=None, consistenc
     global connection_pool
     global default_consistency
 
+    if connection_pool is not None:
+        return
+
     if default_keyspace:
         from cqlengine import models
         models.DEFAULT_KEYSPACE = default_keyspace
