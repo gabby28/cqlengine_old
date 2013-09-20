@@ -10,9 +10,12 @@ LOG = logging.getLogger('cqlengine.cql')
 
 class CQLConnectionError(CQLEngineException): pass
 
-# global connection pool
-connection_pool = None
-default_consistency = None
+class Connection:
+    configured = False
+    connection_pool = None
+    default_consistency = None
+    cluster_args = None
+    cluster_kwargs = None
 
 def setup(hosts, username=None, password=None, default_keyspace=None, consistency=None):
     """
@@ -21,10 +24,10 @@ def setup(hosts, username=None, password=None, default_keyspace=None, consistenc
     :param hosts: list of hosts, strings in the <hostname>:<port>, or just <hostname>
     """
 
-    global connection_pool
-    global default_consistency
+    global Connection
 
-    if connection_pool is not None:
+    if Connection.configured:
+        LOG.info('cqlengine connection is already configured')
         return
 
     if default_keyspace:
@@ -47,32 +50,28 @@ def setup(hosts, username=None, password=None, default_keyspace=None, consistenc
     if not _hosts:
         raise CQLConnectionError("At least one host required")
 
-    cluster = Cluster(_hosts, port=port)
-
-    try:
-        from cassandra.io.libevreactor import LibevConnection
-        cluster.connection_class = LibevConnection
-    except ImportError:
-        LOG.info('Could not import cassandra.io.libevreactor.LibevConnection as connection_class')
-
-    connection_pool = cluster
-
+    Connection.cluster_args = (_hosts, )
+    Connection.cluster_kwargs = {'port': port}
     if consistency is None:
-        default_consistency = ConsistencyLevel.ONE
+        Connection.default_consistency = ConsistencyLevel.ONE
     else:
-        default_consistency = consistency
-
+        Connection.default_consistency = consistency
 
 def get_connection_pool():
-    global connection_pool
-    if hasattr(connection_pool, 'connect'):
-        connection_pool = connection_pool.connect()
-    return connection_pool
+    if Connection.connection_pool is None or Connection.connection_pool.cluster._is_shutdown:
+        cluster = Cluster(*Connection.cluster_args, **Connection.cluster_kwargs)
+        try:
+            from cassandra.io.libevreactor import LibevConnection
+            cluster.connection_class = LibevConnection
+        except ImportError:
+            pass
+        Connection.connection_pool = cluster.connect()
+    return Connection.connection_pool
 
 def get_consistency_level(consistency_level):
     global default_consistency
     if consistency_level is None:
-        return default_consistency
+        return Connection.default_consistency
     else:
         return consistency_level
 
