@@ -17,14 +17,12 @@ class Connection:
     cluster_args = None
     cluster_kwargs = None
 
-def setup(hosts, username=None, password=None, default_keyspace=None, consistency=None):
+def setup(hosts, username=None, password=None, default_keyspace=None, consistency=None, metrics_enabled=False):
     """
     Records the hosts and connects to one of them
 
     :param hosts: list of hosts, strings in the <hostname>:<port>, or just <hostname>
     """
-
-    global Connection
 
     if Connection.configured:
         LOG.info('cqlengine connection is already configured')
@@ -51,7 +49,10 @@ def setup(hosts, username=None, password=None, default_keyspace=None, consistenc
         raise CQLConnectionError("At least one host required")
 
     Connection.cluster_args = (_hosts, )
-    Connection.cluster_kwargs = {'port': port}
+    Connection.cluster_kwargs = {
+        'port': port,
+        'metrics_enabled': metrics_enabled
+    }
     if consistency is None:
         Connection.default_consistency = ConsistencyLevel.ONE
     else:
@@ -69,7 +70,6 @@ def get_connection_pool():
     return Connection.connection_pool
 
 def get_consistency_level(consistency_level):
-    global default_consistency
     if consistency_level is None:
         return Connection.default_consistency
     else:
