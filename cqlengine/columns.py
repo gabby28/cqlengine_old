@@ -161,12 +161,17 @@ class Column(object):
 
     def to_python(self, value):
         '''
-        add some more pythonization to the already pythonized 
+        does some extra python-python conversion
+        eg. convert a datetime to date for a date column
         '''
         return value
 
     @property
     def ctype(self):
+        '''
+        the cassandra type identifier as defined in 
+        python cassandra driver
+        '''
         return internal_clq_type_mapping[self.db_type]
 
     @property
