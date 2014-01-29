@@ -58,14 +58,18 @@ def setup(hosts, username=None, password=None, default_keyspace=None, consistenc
     else:
         Connection.default_consistency = consistency
 
+def get_cluster():
+    cluster = Cluster(*Connection.cluster_args, **Connection.cluster_kwargs)
+    try:
+        from cassandra.io.libevreactor import LibevConnection
+        cluster.connection_class = LibevConnection
+    except ImportError:
+        pass
+    return cluster
+
 def get_connection_pool():
     if Connection.connection_pool is None or Connection.connection_pool.cluster._is_shutdown:
-        cluster = Cluster(*Connection.cluster_args, **Connection.cluster_kwargs)
-        try:
-            from cassandra.io.libevreactor import LibevConnection
-            cluster.connection_class = LibevConnection
-        except ImportError:
-            pass
+        cluster = get_cluster()
         Connection.connection_pool = cluster.connect()
     return Connection.connection_pool
 
